@@ -15,23 +15,15 @@
       --grid-gap: 10px;
       --green: #28a745;
     }
-    html, body {
-      margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; 
-    }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
     .wrap { max-width: 1080px; margin: 24px auto; padding: 0 16px; }
     h1 { font-size: 28px; margin: 0 0 8px; }
     .sub { color: var(--muted); margin-bottom: 16px; }
-    .panel { display: grid; gap: 12px; grid-template-columns: 1fr; }
-    @media (min-width: 760px){ .panel { grid-template-columns: 2fr 1fr; } }
     .controls { background: var(--card); border: 1px solid #1b222c; border-radius: 14px; padding: 16px; }
     .controls label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-    .row { display: grid; gap: 10px; grid-template-columns: 1fr; margin-bottom: 10px; }
-    @media (min-width: 560px){ .row.two { grid-template-columns: 1fr 1fr; } }
-    select, input[type="number"], input[type="text"]{ width: 100%; background: #0e1218; color: var(--fg); border: 1px solid #253041; border-radius: 10px; padding: 10px 12px; outline: none; }
-    .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+    select { width: 100%; background: #0e1218; color: var(--fg); border: 1px solid #253041; border-radius: 10px; padding: 10px 12px; outline: none; margin-bottom: 10px; }
     button { background: var(--accent); color: #08101e; border: none; border-radius: 12px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
-    button.alt { background: #223149; color: var(--fg); }
-    button.warn { background: var(--accent-2); color: #0b1a10; }
+    button:hover { opacity: 0.9; }
 
     .board { margin-top: 16px; background: var(--card); border: 1px solid #1b222c; border-radius: 14px; padding: 16px; }
     .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); }
@@ -39,126 +31,106 @@
     .cell:hover { transform: scale(1.03); }
     .cell.ticked { background: var(--green); color: #fff; border-color: #1f5f2c; }
     .pill { position: absolute; top: 8px; left: 8px; font-size: 10px; color: #b7c3d1; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 999px; }
-    .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
-    .tag { padding: 4px 8px; border-radius: 999px; border: 1px solid #253041; background: #0e1218; }
-
-    .footer { margin: 18px 0 8px; color: var(--muted); font-size: 12px; text-align: center; }
-    .printable-title { text-align: center; font-weight: 700; margin: 0 0 12px; }
-
-    @media print {
-      body { background: white; color: black; }
-      .controls { display: none; }
-      .board { border: none; }
-      .cell { border-color: #ddd; background: white; color: black; }
-      .pill { border-color: #bbb; color: #333; background: #eee; }
-      .footer { display: none; }
-    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>OSRS Solo Bingo Board Generator</h1>
-    <p class="sub">Generate balanced 5x5 boards that focus on GP making, XP, and account milestones. Level tasks now scale with difficulty (Gain 1/2/3/4 levels) and each box is tickable.</p>
+    <p class="sub">Generate balanced 5x5 boards with tickable boxes. Skill tasks use "Gain 1-2 levels" based on difficulty.</p>
 
-    <div class="panel">
-      <div class="controls">
-        <div class="row two">
-          <div>
-            <label for="preset">Difficulty preset</label>
-            <select id="preset">
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="mixed" selected>Mixed</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-          <div>
-            <label for="seed">Seed (optional, integer)</label>
-            <input id="seed" type="number" placeholder="e.g. 1234" />
-          </div>
-        </div>
-        <div class="row two">
-          <div>
-            <label for="balance">Category balancing</label>
-            <select id="balance">
-              <option value="on" selected>On - aim for even mix</option>
-              <option value="off">Off - pure random</option>
-            </select>
-          </div>
-          <div>
-            <label for="free">Free space</label>
-            <select id="freespace">
-              <option value="none" selected>None</option>
-              <option value="center">Free in the middle</option>
-            </select>
-          </div>
-        </div>
-        <div class="btns">
-          <button id="btn-generate">Generate board</button>
-          <button class="alt" id="btn-shuffle">Shuffle layout</button>
-          <button class="warn" id="btn-print">Print or save to PDF</button>
-        </div>
-      </div>
-
-      <div class="board">
-        <h3 class="printable-title">OSRS Solo Bingo</h3>
-        <div class="legend" id="legend"></div>
-        <div class="grid" id="grid" aria-live="polite"></div>
-      </div>
+    <div class="controls">
+      <label for="preset">Difficulty</label>
+      <select id="preset">
+        <option value="easy">Easy</option>
+        <option value="medium">Medium</option>
+        <option value="mixed" selected>Mixed</option>
+        <option value="hard">Hard</option>
+      </select>
+      <button id="generate">Generate Board</button>
     </div>
 
-    <p class="footer">Tip: tap or click boxes to mark them complete.</p>
+    <div class="board">
+      <div class="grid" id="grid"></div>
+    </div>
   </div>
 
   <script>
-    const categories = ["Skilling", "Combat", "Money", "Milestone"];
-    const difficulties = ["Easy", "Medium", "Hard"];
-
-    function gainLevelTasks() {
-      const skills = [
-        "Attack","Strength","Defence","Ranged","Magic",
-        "Prayer","Runecraft","Construction","Agility","Herblore",
-        "Thieving","Crafting","Fletching","Slayer","Hunter",
-        "Mining","Smithing","Fishing","Cooking","Firemaking",
-        "Woodcutting","Farming"
-      ];
-      const steps = [1,2,3,4]; // gain levels scale with difficulty
-      const out = [];
-      for (const s of skills) {
-        for (const g of steps) {
-          let d = g === 1 ? "Easy" : g === 2 ? "Medium" : g >= 3 ? "Hard" : "Hard";
-          out.push({ name: `Gain ${g} ${s} level${g>1?'s':''}`, category: "Skilling", difficulty: d });
-        }
-      }
-      return out;
-    }
-
-    // Keep the rest of the code unchanged
-    // We'll append an event listener to make cells tickable
-
-    // Mutation: attach toggling
-    const origRenderGrid = function(grid) {
-      const gridEl = document.getElementById('grid');
-      gridEl.innerHTML = '';
-      grid.flat().forEach(cell => {
-        const div = document.createElement('div');
-        div.className = 'cell';
-        const pill = document.createElement('div');
-        pill.className = 'pill';
-        pill.textContent = `${cell.category} • ${cell.difficulty}`;
-        const text = document.createElement('div');
-        text.textContent = cell.name;
-        div.appendChild(pill);
-        div.appendChild(text);
-        div.addEventListener('click', () => div.classList.toggle('ticked'));
-        gridEl.appendChild(div);
-      });
+    const DATA_PATHS = {
+      skills: "data/skills.json",
+      otherTasks: "data/other-tasks.json"
     };
 
-    // Quick bootstrap to ensure grid regenerates
-    document.addEventListener('DOMContentLoaded', () => {
-      if (typeof makeBoard === 'function') makeBoard();
-    });
+    let cachedTasks = [];
+
+    async function fetchJson(path) {
+      const response = await fetch(path);
+      if (!response.ok) {
+        throw new Error(`Failed to load ${path} (${response.status})`);
+      }
+      return response.json();
+    }
+
+    function buildGainLevelTasks(skills) {
+      const levelTasks = [];
+      for (const skill of skills) {
+        levelTasks.push({ name: `Gain 1 ${skill} level`, category: "Skilling", difficulty: "Easy" });
+        levelTasks.push({ name: `Gain 2 ${skill} levels`, category: "Skilling", difficulty: "Medium" });
+      }
+      return levelTasks;
+    }
+
+    function shuffle(values) {
+      return [...values].sort(() => Math.random() - 0.5);
+    }
+
+    async function loadTaskPool() {
+      const [skills, otherTasks] = await Promise.all([
+        fetchJson(DATA_PATHS.skills),
+        fetchJson(DATA_PATHS.otherTasks)
+      ]);
+      return [...buildGainLevelTasks(skills), ...otherTasks];
+    }
+
+    function generateBoard() {
+      if (cachedTasks.length === 0) {
+        return;
+      }
+
+      const gridEl = document.getElementById("grid");
+      gridEl.innerHTML = "";
+      const pool = shuffle(cachedTasks).slice(0, 25);
+
+      for (const task of pool) {
+        const div = document.createElement("div");
+        div.className = "cell";
+
+        const pill = document.createElement("div");
+        pill.className = "pill";
+        pill.textContent = `${task.category} - ${task.difficulty}`;
+
+        const text = document.createElement("div");
+        text.textContent = task.name;
+
+        div.appendChild(pill);
+        div.appendChild(text);
+        div.addEventListener("click", () => div.classList.toggle("ticked"));
+        gridEl.appendChild(div);
+      }
+    }
+
+    async function initialize() {
+      try {
+        cachedTasks = await loadTaskPool();
+        generateBoard();
+      } catch (err) {
+        console.error(err);
+        const gridEl = document.getElementById("grid");
+        gridEl.innerHTML = "<div class='cell'>Failed to load tasks.</div>";
+      }
+    }
+
+    document.getElementById("generate").addEventListener("click", generateBoard);
+    document.addEventListener("DOMContentLoaded", initialize);
   </script>
 </body>
 </html>

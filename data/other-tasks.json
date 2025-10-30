@@ -1,0 +1,28 @@
+[
+  { "name": "Complete a Slayer task", "category": "Combat", "difficulty": "Easy" },
+  { "name": "Complete 3 Slayer tasks", "category": "Combat", "difficulty": "Medium" },
+  { "name": "Kill a Barrows brother", "category": "Combat", "difficulty": "Medium" },
+  { "name": "Kill 100 monsters of any type", "category": "Combat", "difficulty": "Medium" },
+
+  { "name": "Cook 100 lobsters", "category": "Skilling", "difficulty": "Easy" },
+  { "name": "Fletch 250 yew longbows (u)", "category": "Skilling", "difficulty": "Medium" },
+  { "name": "Mine 250 coal", "category": "Skilling", "difficulty": "Medium" },
+  { "name": "Catch 100 monkfish", "category": "Skilling", "difficulty": "Medium" },
+  { "name": "Craft 100 nature runes", "category": "Skilling", "difficulty": "Medium" },
+  { "name": "Harvest 20 herb patches", "category": "Skilling", "difficulty": "Easy" },
+  { "name": "Pickpocket 500 times", "category": "Skilling", "difficulty": "Medium" },
+
+  { "name": "Earn 500k GP", "category": "Money", "difficulty": "Easy" },
+  { "name": "Earn 1m GP", "category": "Money", "difficulty": "Medium" },
+  { "name": "Sell 100 noted items on the GE", "category": "Money", "difficulty": "Medium" },
+  { "name": "Flip 5 items for profit", "category": "Money", "difficulty": "Easy" },
+  { "name": "Alch 200 items for profit", "category": "Money", "difficulty": "Medium" },
+
+  { "name": "Complete a beginner clue", "category": "Milestone", "difficulty": "Easy" },
+  { "name": "Complete an easy clue", "category": "Milestone", "difficulty": "Easy" },
+  { "name": "Complete a medium clue", "category": "Milestone", "difficulty": "Medium" },
+  { "name": "Unlock Fairy Rings", "category": "Milestone", "difficulty": "Medium" },
+  { "name": "Complete Animal Magnetism", "category": "Milestone", "difficulty": "Medium" },
+  { "name": "Unlock mithril gloves or better (RFD)", "category": "Milestone", "difficulty": "Medium" },
+  { "name": "Equip an Iban's staff or dragon scimitar", "category": "Milestone", "difficulty": "Medium" }
+]
