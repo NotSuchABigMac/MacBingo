@@ -24,6 +24,14 @@
     select { width: 100%; background: #0e1218; color: var(--fg); border: 1px solid #253041; border-radius: 10px; padding: 10px 12px; outline: none; margin-bottom: 10px; }
     button { background: var(--accent); color: #08101e; border: none; border-radius: 12px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
     button:hover { opacity: 0.9; }
+    .weight-controls { margin: 18px 0; border-top: 1px solid #1b222c; padding-top: 12px; }
+    .weight-row { display: grid; grid-template-columns: 140px 1fr 52px; align-items: center; gap: 10px; font-size: 13px; margin-bottom: 10px; }
+    .weight-row input[type="range"] { width: 100%; }
+    .weight-value { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .timer { margin-bottom: 16px; }
+    .timer-label { font-size: 13px; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .timer-bar { height: 10px; width: 100%; background: #141b25; border-radius: 999px; overflow: hidden; border: 1px solid #203044; }
+    .timer-bar-fill { height: 100%; background: var(--accent-2); transition: width 0.5s ease; }
 
     .board { margin-top: 16px; background: var(--card); border: 1px solid #1b222c; border-radius: 14px; padding: 16px; }
     .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); }
@@ -31,6 +39,7 @@
     .cell:hover { transform: scale(1.03); }
     .cell.ticked { background: var(--green); color: #fff; border-color: #1f5f2c; }
     .pill { position: absolute; top: 8px; left: 8px; font-size: 10px; color: #b7c3d1; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 999px; }
+    .grid.expired-message .cell { cursor: default; }
   </style>
 </head>
 <body>
@@ -46,10 +55,47 @@
         <option value="mixed" selected>Mixed</option>
         <option value="hard">Hard</option>
       </select>
+      <div class="weight-controls">
+        <label>Task Mix (must total 100%)</label>
+        <div class="weight-row">
+          <span>Skill Levels</span>
+          <input type="range" min="0" max="100" value="40" data-pool="levels" />
+          <span class="weight-value" data-display="levels">40%</span>
+        </div>
+        <div class="weight-row">
+          <span>Combat</span>
+          <input type="range" min="0" max="100" value="20" data-pool="combat" />
+          <span class="weight-value" data-display="combat">20%</span>
+        </div>
+        <div class="weight-row">
+          <span>Skilling</span>
+          <input type="range" min="0" max="100" value="20" data-pool="skilling" />
+          <span class="weight-value" data-display="skilling">20%</span>
+        </div>
+        <div class="weight-row">
+          <span>Money</span>
+          <input type="range" min="0" max="100" value="10" data-pool="money" />
+          <span class="weight-value" data-display="money">10%</span>
+        </div>
+        <div class="weight-row">
+          <span>Milestone</span>
+          <input type="range" min="0" max="100" value="10" data-pool="milestone" />
+          <span class="weight-value" data-display="milestone">10%</span>
+        </div>
+      </div>
       <button id="generate">Generate Board</button>
     </div>
 
     <div class="board">
+      <div class="timer" id="timer" hidden>
+        <div class="timer-label">
+          <span>Bingo ends in</span>
+          <span id="timer-text">--</span>
+        </div>
+        <div class="timer-bar">
+          <div class="timer-bar-fill" id="timer-fill" style="width: 100%;"></div>
+        </div>
+      </div>
       <div class="grid" id="grid"></div>
     </div>
   </div>
@@ -60,7 +106,20 @@
       otherTasks: "data/other-tasks.json"
     };
 
-    let cachedTasks = [];
+    const POOL_KEYS = ["levels", "combat", "skilling", "money", "milestone"];
+    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const BOARD_COOKIE_NAME = "osrs_bingo_board";
+
+    let taskPools = null;
+    let poolWeights = {
+      levels: 40,
+      combat: 20,
+      skilling: 20,
+      money: 10,
+      milestone: 10
+    };
+    let activeBoard = null;
+    let countdownInterval = null;
 
     async function fetchJson(path) {
       const response = await fetch(path);
@@ -88,21 +147,55 @@
         fetchJson(DATA_PATHS.skills),
         fetchJson(DATA_PATHS.otherTasks)
       ]);
-      return [...buildGainLevelTasks(skills), ...otherTasks];
+      const levelTasks = buildGainLevelTasks(skills);
+      return {
+        levels: levelTasks,
+        combat: otherTasks.filter(task => task.category === "Combat"),
+        skilling: otherTasks.filter(task => task.category === "Skilling"),
+        money: otherTasks.filter(task => task.category === "Money"),
+        milestone: otherTasks.filter(task => task.category === "Milestone")
+      };
     }
 
-    function generateBoard() {
-      if (cachedTasks.length === 0) {
+    function generateBoard(forceNew = false) {
+      if (!taskPools) {
+        return;
+      }
+
+      if (isBoardActive() && !forceNew) {
+        renderBoard(activeBoard);
+        return;
+      }
+
+      const tasks = pickTasks();
+      const now = Date.now();
+      activeBoard = {
+        tasks,
+        ticks: Array(tasks.length).fill(false),
+        startedAt: now,
+        expiresAt: now + ONE_WEEK_MS,
+        weights: { ...poolWeights }
+      };
+
+      saveBoardState();
+      renderBoard(activeBoard);
+    }
+
+    function renderBoard(board) {
+      if (!board) {
         return;
       }
 
       const gridEl = document.getElementById("grid");
+      gridEl.classList.remove("expired-message");
       gridEl.innerHTML = "";
-      const pool = shuffle(cachedTasks).slice(0, 25);
 
-      for (const task of pool) {
+      board.tasks.forEach((task, index) => {
         const div = document.createElement("div");
         div.className = "cell";
+        if (board.ticks[index]) {
+          div.classList.add("ticked");
+        }
 
         const pill = document.createElement("div");
         pill.className = "pill";
@@ -113,15 +206,341 @@
 
         div.appendChild(pill);
         div.appendChild(text);
-        div.addEventListener("click", () => div.classList.toggle("ticked"));
+        div.addEventListener("click", () => toggleTask(index, div));
         gridEl.appendChild(div);
+      });
+
+      updateWeightUIFromBoard(board);
+      startCountdown();
+    }
+
+    function pickTasks() {
+      const pools = POOL_KEYS
+        .map(key => ({
+          key,
+          weight: poolWeights[key],
+          tasks: [...taskPools[key]]
+        }))
+        .filter(pool => pool.tasks.length > 0);
+
+      const chosen = [];
+
+      for (let i = 0; i < 25 && pools.length > 0; i++) {
+        const activePools = pools.filter(pool => pool.tasks.length > 0 && pool.weight > 0);
+        if (activePools.length === 0) {
+          activePools.push(...pools.filter(pool => pool.tasks.length > 0));
+        }
+
+        const pool = weightedPick(activePools);
+        const taskIndex = Math.floor(Math.random() * pool.tasks.length);
+        chosen.push(pool.tasks.splice(taskIndex, 1)[0]);
       }
+
+      if (chosen.length < 25) {
+        const leftovers = pools.flatMap(pool => pool.tasks);
+        shuffle(leftovers)
+          .slice(0, 25 - chosen.length)
+          .forEach(task => chosen.push(task));
+      }
+
+      return chosen;
+    }
+
+    function weightedPick(pools) {
+      const total = pools.reduce((sum, pool) => sum + pool.weight, 0);
+      if (total === 0) {
+        return pools[Math.floor(Math.random() * pools.length)];
+      }
+
+      let roll = Math.random() * total;
+      for (const pool of pools) {
+        if (roll < pool.weight) {
+          return pool;
+        }
+        roll -= pool.weight;
+      }
+      return pools[pools.length - 1];
+    }
+
+    function normalizeWeights(changedKey, newValue) {
+      newValue = Math.max(0, Math.min(100, Math.round(newValue)));
+
+      const otherKeys = POOL_KEYS.filter(key => key !== changedKey);
+      const totalOthers = otherKeys.reduce((sum, key) => sum + poolWeights[key], 0);
+      const remaining = 100 - newValue;
+
+      let adjustedWeights = {};
+      if (otherKeys.length === 0) {
+        adjustedWeights[changedKey] = 100;
+        poolWeights = adjustedWeights;
+        updateWeightUI();
+        return;
+      }
+
+      if (totalOthers === 0) {
+        const evenShare = remaining / otherKeys.length;
+        otherKeys.forEach(key => {
+          adjustedWeights[key] = evenShare;
+        });
+      } else {
+        otherKeys.forEach(key => {
+          adjustedWeights[key] = poolWeights[key] * (remaining / totalOthers);
+        });
+      }
+
+      adjustedWeights[changedKey] = newValue;
+      distributeRounding(adjustedWeights);
+      poolWeights = adjustedWeights;
+      updateWeightUI();
+
+      if (!isBoardActive()) {
+        generateBoard(true);
+      }
+    }
+
+    function distributeRounding(weights) {
+      let total = 0;
+      POOL_KEYS.forEach(key => {
+        const raw = Number.isFinite(weights[key]) ? weights[key] : 0;
+        weights[key] = Math.max(0, Math.round(raw));
+        total += weights[key];
+      });
+
+      const diff = 100 - total;
+      if (diff === 0) {
+        return;
+      }
+
+      const direction = diff > 0 ? 1 : -1;
+      let remaining = Math.abs(diff);
+
+      const sortedKeys = [...POOL_KEYS].sort((a, b) => {
+        if (direction > 0) {
+          return weights[a] - weights[b];
+        }
+        return weights[b] - weights[a];
+      });
+
+      let index = 0;
+      while (remaining > 0) {
+        const key = sortedKeys[index % sortedKeys.length];
+        const newValue = weights[key] + direction;
+        if (newValue >= 0 && newValue <= 100) {
+          weights[key] = newValue;
+          remaining--;
+        }
+        index++;
+      }
+    }
+
+    function updateWeightUI() {
+      const sliders = document.querySelectorAll(".weight-row input[type='range']");
+      sliders.forEach(slider => {
+        const key = slider.dataset.pool;
+        const value = poolWeights[key];
+        slider.value = value;
+
+        const display = document.querySelector(`.weight-value[data-display='${key}']`);
+        if (display) {
+          display.textContent = `${value}%`;
+        }
+      });
+    }
+
+    function updateWeightUIFromBoard(board) {
+      if (board && board.weights) {
+        poolWeights = { ...board.weights };
+      }
+      updateWeightUI();
+    }
+
+    function bindWeightControls() {
+      const sliders = document.querySelectorAll(".weight-row input[type='range']");
+      sliders.forEach(slider => {
+        slider.addEventListener("input", event => {
+          const key = event.target.dataset.pool;
+          normalizeWeights(key, Number(event.target.value));
+        });
+      });
+
+      updateWeightUI();
+    }
+
+    function toggleTask(index, cellEl) {
+      if (!activeBoard || index < 0 || index >= activeBoard.tasks.length) {
+        return;
+      }
+
+      activeBoard.ticks[index] = !activeBoard.ticks[index];
+      if (cellEl) {
+        cellEl.classList.toggle("ticked", activeBoard.ticks[index]);
+      }
+      saveBoardState();
+    }
+
+    function saveBoardState() {
+      if (!activeBoard) {
+        clearBoardCookie();
+        return;
+      }
+
+      const payload = {
+        tasks: activeBoard.tasks.map(task => [task.name, task.category, task.difficulty]),
+        ticks: activeBoard.ticks,
+        startedAt: activeBoard.startedAt,
+        expiresAt: activeBoard.expiresAt,
+        weights: activeBoard.weights
+      };
+
+      const expires = new Date(activeBoard.expiresAt).toUTCString();
+      try {
+        const encoded = encodeURIComponent(JSON.stringify(payload));
+        document.cookie = `${BOARD_COOKIE_NAME}=${encoded};expires=${expires};path=/;SameSite=Lax`;
+      } catch (err) {
+        console.error("Failed to persist board state", err);
+      }
+    }
+
+    function loadBoardFromCookie() {
+      const raw = getCookie(BOARD_COOKIE_NAME);
+      if (!raw) {
+        return null;
+      }
+
+      try {
+        const payload = JSON.parse(decodeURIComponent(raw));
+        const tasks = (payload.tasks || []).map(item => ({
+          name: item[0],
+          category: item[1],
+          difficulty: item[2]
+        }));
+
+        if (!payload.startedAt || !payload.expiresAt || tasks.length !== 25) {
+          return null;
+        }
+
+        const ticks = tasks.map((_, index) => Boolean(payload.ticks && payload.ticks[index]));
+
+        return {
+          tasks,
+          ticks,
+          startedAt: payload.startedAt,
+          expiresAt: payload.expiresAt,
+          weights: payload.weights || { ...poolWeights }
+        };
+      } catch (err) {
+        console.error("Failed to parse board cookie", err);
+        return null;
+      }
+    }
+
+    function clearBoardCookie() {
+      document.cookie = `${BOARD_COOKIE_NAME}=;expires=${new Date(0).toUTCString()};path=/;SameSite=Lax`;
+    }
+
+    function getCookie(name) {
+      const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+      return match ? match[2] : null;
+    }
+
+    function startCountdown() {
+      stopCountdown();
+
+      const timer = document.getElementById("timer");
+      const textEl = document.getElementById("timer-text");
+      const fillEl = document.getElementById("timer-fill");
+
+      if (!activeBoard) {
+        timer.hidden = true;
+        return;
+      }
+
+      timer.hidden = false;
+
+      const tick = () => {
+        if (!activeBoard) {
+          timer.hidden = true;
+          stopCountdown();
+          return;
+        }
+
+        const now = Date.now();
+        const remaining = activeBoard.expiresAt - now;
+        const total = Math.max(ONE_WEEK_MS, activeBoard.expiresAt - activeBoard.startedAt);
+        const ratio = Math.max(0, Math.min(1, remaining / total));
+        fillEl.style.width = `${(ratio * 100).toFixed(2)}%`;
+
+        if (remaining <= 0) {
+          textEl.textContent = "Board expired";
+          fillEl.style.width = "0%";
+          stopCountdown();
+          activeBoard = null;
+          clearBoardCookie();
+          showExpiredMessage();
+          return;
+        }
+
+        textEl.textContent = formatDuration(remaining);
+      };
+
+      tick();
+      countdownInterval = setInterval(tick, 1000);
+    }
+
+    function stopCountdown() {
+      if (countdownInterval) {
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }
+    }
+
+    function showExpiredMessage() {
+      const gridEl = document.getElementById("grid");
+      gridEl.classList.add("expired-message");
+      gridEl.innerHTML = "<div class='cell'>Your bingo card has expired. Generate a new board to reset the week!</div>";
+    }
+
+    function formatDuration(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const days = Math.floor(totalSeconds / 86400);
+      const hours = Math.floor((totalSeconds % 86400) / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+
+      const parts = [];
+      if (days > 0) parts.push(`${days}d`);
+      parts.push(`${hours.toString().padStart(2, "0")}h`);
+      parts.push(`${minutes.toString().padStart(2, "0")}m`);
+      parts.push(`${seconds.toString().padStart(2, "0")}s`);
+      return parts.join(" ");
+    }
+
+    function isBoardActive() {
+      if (!activeBoard) {
+        return false;
+      }
+      if (activeBoard.expiresAt <= Date.now()) {
+        activeBoard = null;
+        clearBoardCookie();
+        stopCountdown();
+        return false;
+      }
+      return true;
     }
 
     async function initialize() {
       try {
-        cachedTasks = await loadTaskPool();
-        generateBoard();
+        taskPools = await loadTaskPool();
+        bindWeightControls();
+
+        const savedBoard = loadBoardFromCookie();
+        if (savedBoard && savedBoard.expiresAt > Date.now()) {
+          activeBoard = savedBoard;
+          renderBoard(activeBoard);
+        } else {
+          clearBoardCookie();
+          generateBoard(true);
+        }
       } catch (err) {
         console.error(err);
         const gridEl = document.getElementById("grid");
@@ -129,7 +548,9 @@
       }
     }
 
-    document.getElementById("generate").addEventListener("click", generateBoard);
+    document.getElementById("generate").addEventListener("click", () => {
+      generateBoard(true);
+    });
     document.addEventListener("DOMContentLoaded", initialize);
   </script>
 </body>
