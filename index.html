@@ -34,6 +34,11 @@
     .timer-bar-fill { height: 100%; background: var(--accent-2); transition: width 0.5s ease; }
 
     .board { margin-top: 16px; background: var(--card); border: 1px solid #1b222c; border-radius: 14px; padding: 16px; }
+    .gamification { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .gamification-card { background: #0e1218; border: 1px solid #253041; border-radius: 12px; padding: 12px 14px; }
+    .gamification-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .gamification-value { font-size: 24px; font-weight: 600; margin-top: 6px; }
+    .gamification-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
     .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); }
     .cell { background: #0e1218; border: 1px solid #253041; border-radius: 12px; padding: 10px; min-height: 105px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: 13px; line-height: 1.3; position: relative; cursor: pointer; transition: background 0.2s, transform 0.1s; }
     .cell:hover { transform: scale(1.03); }
@@ -87,6 +92,23 @@
     </div>
 
     <div class="board">
+      <div class="gamification" id="gamification">
+        <div class="gamification-card">
+          <div class="gamification-label">Total Points</div>
+          <div class="gamification-value" id="points-total">0</div>
+          <div class="gamification-hint">Current after decay</div>
+        </div>
+        <div class="gamification-card">
+          <div class="gamification-label">Daily Average</div>
+          <div class="gamification-value" id="points-average">0</div>
+          <div class="gamification-hint" id="points-average-hint">Rolling history</div>
+        </div>
+        <div class="gamification-card">
+          <div class="gamification-label">Goal To Stay Ahead</div>
+          <div class="gamification-value" id="points-goal">0</div>
+          <div class="gamification-hint" id="points-goal-hint">Points needed today</div>
+        </div>
+      </div>
       <div class="timer" id="timer" hidden>
         <div class="timer-label">
           <span>Bingo ends in</span>
@@ -109,6 +131,15 @@
     const POOL_KEYS = ["levels", "combat", "skilling", "money", "milestone"];
     const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
     const BOARD_COOKIE_NAME = "osrs_bingo_board";
+    const SCORE_STORAGE_KEY = "osrs_bingo_score_v1";
+    const SCORE_RULES = {
+      easy: 1,
+      medium: 2,
+      hard: 3,
+      line: 5,
+      decay: 0.2
+    };
+    const SCORE_HISTORY_LIMIT = 30;
 
     let taskPools = null;
     let poolWeights = {
@@ -120,6 +151,7 @@
     };
     let activeBoard = null;
     let countdownInterval = null;
+    let gameStats = null;
 
     async function fetchJson(path) {
       const response = await fetch(path);
@@ -140,6 +172,128 @@
 
     function shuffle(values) {
       return [...values].sort(() => Math.random() - 0.5);
+    }
+
+    function getLocalStorageSafe() {
+      try {
+        return window.localStorage;
+      } catch (err) {
+        console.warn("Local storage unavailable", err);
+        return null;
+      }
+    }
+
+    function loadGameStats() {
+      const storage = getLocalStorageSafe();
+      const baseline = { points: 0, lastDecay: Date.now(), history: [] };
+      if (!storage) {
+        return { ...baseline, ephemeral: true };
+      }
+      try {
+        const raw = storage.getItem(SCORE_STORAGE_KEY);
+        if (!raw) {
+          return baseline;
+        }
+        const parsed = JSON.parse(raw);
+        return {
+          points: Number(parsed.points) || 0,
+          lastDecay: Number(parsed.lastDecay) || Date.now(),
+          history: Array.isArray(parsed.history) ? parsed.history : []
+        };
+      } catch {
+        return baseline;
+      }
+    }
+
+    function saveGameStats() {
+      if (!gameStats || gameStats.ephemeral) {
+        return;
+      }
+      const storage = getLocalStorageSafe();
+      if (!storage) {
+        return;
+      }
+      storage.setItem(
+        SCORE_STORAGE_KEY,
+        JSON.stringify({
+          points: gameStats.points,
+          lastDecay: gameStats.lastDecay,
+          history: gameStats.history
+        })
+      );
+    }
+
+    function startOfDay(timestamp) {
+      const date = new Date(timestamp);
+      date.setHours(0, 0, 0, 0);
+      return date.getTime();
+    }
+
+    function applyDailyDecay(stats) {
+      const now = Date.now();
+      let cursor = startOfDay(stats.lastDecay || now);
+      const today = startOfDay(now);
+
+      while (cursor < today) {
+        stats.points = Number((Math.max(0, stats.points) * (1 - SCORE_RULES.decay)).toFixed(2));
+        cursor += 24 * 60 * 60 * 1000;
+        stats.history = [...(stats.history || []), { date: cursor, points: stats.points }].slice(-SCORE_HISTORY_LIMIT);
+      }
+
+      stats.lastDecay = now;
+      return stats;
+    }
+
+    function formatPoints(value) {
+      return Number(value || 0).toFixed(1).replace(/\.0$/, "");
+    }
+
+    function getAveragePoints(stats) {
+      if (!stats || !stats.history || stats.history.length === 0) {
+        return stats ? stats.points : 0;
+      }
+      const total = stats.history.reduce((sum, entry) => sum + (Number(entry.points) || 0), 0);
+      return total / stats.history.length;
+    }
+
+    function updateScoreUI() {
+      if (!gameStats) {
+        return;
+      }
+      const totalEl = document.getElementById("points-total");
+      if (!totalEl) {
+        return;
+      }
+      const average = getAveragePoints(gameStats);
+      const needed = Math.max(0, Math.ceil(average - gameStats.points));
+
+      totalEl.textContent = formatPoints(gameStats.points);
+      const averageEl = document.getElementById("points-average");
+      if (averageEl) {
+        averageEl.textContent = formatPoints(average);
+      }
+      const goalEl = document.getElementById("points-goal");
+      const goalHint = document.getElementById("points-goal-hint");
+      if (goalEl && goalHint) {
+        goalEl.textContent = needed;
+        goalHint.textContent = needed > 0 ? "Earn today to stay above avg" : "Already above average";
+      }
+    }
+
+    function adjustPoints(delta) {
+      if (!gameStats || !delta) {
+        return;
+      }
+      const next = Math.max(0, Number((gameStats.points + delta).toFixed(2)));
+      gameStats.points = next;
+      saveGameStats();
+      updateScoreUI();
+    }
+
+    function initializeGameStats() {
+      gameStats = applyDailyDecay(loadGameStats());
+      saveGameStats();
+      updateScoreUI();
     }
 
     async function loadTaskPool() {
@@ -174,7 +328,11 @@
         ticks: Array(tasks.length).fill(false),
         startedAt: now,
         expiresAt: now + ONE_WEEK_MS,
-        weights: { ...poolWeights }
+        weights: { ...poolWeights },
+        lineRewards: {
+          rows: Array(5).fill(false),
+          cols: Array(5).fill(false)
+        }
       };
 
       saveBoardState();
@@ -186,6 +344,7 @@
         return;
       }
 
+      ensureLineRewards(board);
       const gridEl = document.getElementById("grid");
       gridEl.classList.remove("expired-message");
       gridEl.innerHTML = "";
@@ -366,6 +525,55 @@
       updateWeightUI();
     }
 
+    function getTaskPointValue(task) {
+      if (!task || !task.difficulty) {
+        return 0;
+      }
+      return SCORE_RULES[task.difficulty.toLowerCase()] || 0;
+    }
+
+    function ensureLineRewards(board) {
+      if (!board.lineRewards) {
+        board.lineRewards = { rows: Array(5).fill(false), cols: Array(5).fill(false) };
+        return;
+      }
+      board.lineRewards.rows = Array.from({ length: 5 }, (_, idx) => Boolean(board.lineRewards.rows[idx]));
+      board.lineRewards.cols = Array.from({ length: 5 }, (_, idx) => Boolean(board.lineRewards.cols[idx]));
+    }
+
+    function isRowComplete(rowIndex) {
+      const start = rowIndex * 5;
+      for (let i = start; i < start + 5; i++) {
+        if (!activeBoard.ticks[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function isColumnComplete(colIndex) {
+      for (let i = colIndex; i < activeBoard.ticks.length; i += 5) {
+        if (!activeBoard.ticks[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function reconcileLineReward(type, index, isComplete) {
+      if (!activeBoard || !activeBoard.lineRewards) {
+        return;
+      }
+      const alreadyComplete = activeBoard.lineRewards[type][index];
+      if (isComplete && !alreadyComplete) {
+        activeBoard.lineRewards[type][index] = true;
+        adjustPoints(SCORE_RULES.line);
+      } else if (!isComplete && alreadyComplete) {
+        activeBoard.lineRewards[type][index] = false;
+        adjustPoints(-SCORE_RULES.line);
+      }
+    }
+
     function toggleTask(index, cellEl) {
       if (!activeBoard || index < 0 || index >= activeBoard.tasks.length) {
         return;
@@ -375,6 +583,15 @@
       if (cellEl) {
         cellEl.classList.toggle("ticked", activeBoard.ticks[index]);
       }
+      const task = activeBoard.tasks[index];
+      const baseValue = getTaskPointValue(task);
+      adjustPoints(activeBoard.ticks[index] ? baseValue : -baseValue);
+
+      const rowIndex = Math.floor(index / 5);
+      const colIndex = index % 5;
+      reconcileLineReward("rows", rowIndex, isRowComplete(rowIndex));
+      reconcileLineReward("cols", colIndex, isColumnComplete(colIndex));
+
       saveBoardState();
     }
 
@@ -389,7 +606,8 @@
         ticks: activeBoard.ticks,
         startedAt: activeBoard.startedAt,
         expiresAt: activeBoard.expiresAt,
-        weights: activeBoard.weights
+        weights: activeBoard.weights,
+        lineRewards: activeBoard.lineRewards
       };
 
       const expires = new Date(activeBoard.expiresAt).toUTCString();
@@ -421,13 +639,16 @@
 
         const ticks = tasks.map((_, index) => Boolean(payload.ticks && payload.ticks[index]));
 
-        return {
+        const board = {
           tasks,
           ticks,
           startedAt: payload.startedAt,
           expiresAt: payload.expiresAt,
           weights: payload.weights || { ...poolWeights }
         };
+        board.lineRewards = payload.lineRewards || { rows: Array(5).fill(false), cols: Array(5).fill(false) };
+        ensureLineRewards(board);
+        return board;
       } catch (err) {
         console.error("Failed to parse board cookie", err);
         return null;
@@ -530,6 +751,7 @@
 
     async function initialize() {
       try {
+        initializeGameStats();
         taskPools = await loadTaskPool();
         bindWeightControls();
 
